@@ -1,11 +1,13 @@
 import pygame
 import sys
 import math
+import random
+from collections import deque
 
 pygame.init()
 
-WIDTH, HEIGHT = 800, 600
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
+WIDTH, HEIGHT = 800, 700
+screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.SCALED, vsync=1)
 pygame.display.set_caption("Double pendulum")
 
 clock = pygame.time.Clock()
@@ -16,63 +18,81 @@ m1 = 1
 m2 = 1
 
 #the lengths of the pendulums
-l1 = 0.4
-l2 = 0.3
+l1 = 0.6
+l2 = 0.4
 
 #angle of the pendulum. 0 is down. 1 is the top one and 2 is the bottom pendulum
-t1 = math.radians(90)
+t1 = math.radians(170)
 t2 = 0
 
 #angular velocity
 w1 = w2 = 0
-
-#angular acceleration 
-a1 = a2 = 0
 
 #self explanitory (gravity)
 g = 9.81
 
 #anchor point
 x0 = WIDTH/2
-y0 = HEIGHT * 0.3
+y0 = HEIGHT * 0.5
+
+friction = 0.01
 
 SCALE = 300
 
-def updateAngles(dt):
-    global t1, t2, w1, w2, a1, a2, l1, l2, m1, m2
+def compute_accelerations(t1, t2, w1, w2):
     delta = t1 - t2
-        
     mass_term = 2 * m1 + m2
     coupling_term = m2 * math.cos(2 * delta)
     den = mass_term - coupling_term
-    
-    #top pendulum acceleration
+
     gravity_on_rod1 = -g * (2 * m1 + m2) * math.sin(t1)
     gravity_cross_term = -m2 * g * math.sin(t1 - 2 * t2)
     rod2_swing_effect = w2 ** 2 * l2
     rod1_swing_effect = w1 ** 2 * l1 * math.cos(delta)
     coupling_push = -2 * math.sin(delta) * m2 * (rod2_swing_effect + rod1_swing_effect)
-
     numerator_1 = gravity_on_rod1 + gravity_cross_term + coupling_push
     alpha1 = numerator_1 / (l1 * den)
-    
-    #bottom pendulum acceleration
+
     rod1_pull_from_swinging = w1 ** 2 * l1 * (m1 + m2)
     gravity_pull = g * (m1 + m2) * math.cos(t1)
     rod2_own_swing = w2 ** 2 * l2 * m2 * math.cos(delta)
-
     numerator_2 = 2 * math.sin(delta) * (rod1_pull_from_swinging + gravity_pull + rod2_own_swing)
     alpha2 = numerator_2 / (l2 * den)
-    
-    w1 += alpha1 * dt
-    w2 += alpha2 * dt
-    
-    t1 += w1 * dt
-    t2 += w2 * dt
 
+    return alpha1, alpha2
+
+
+def updateAngles(dt):
+    global t1, t2, w1, w2
+    dt = min(dt, 0.05)
+    substeps = 32
+    h = dt / substeps
+
+    for _ in range(substeps):
+        k1_dt1, k1_dt2 = w1, w2
+        k1_dw1, k1_dw2 = compute_accelerations(t1, t2, w1, w2)
+
+        k2_dt1, k2_dt2 = w1 + h/2 * k1_dw1, w2 + h/2 * k1_dw2
+        k2_dw1, k2_dw2 = compute_accelerations(t1 + h/2 * k1_dt1, t2 + h/2 * k1_dt2, w1 + h/2 * k1_dw1, w2 + h/2 * k1_dw2)
+
+        k3_dt1, k3_dt2 = w1 + h/2 * k2_dw1, w2 + h/2 * k2_dw2
+        k3_dw1, k3_dw2 = compute_accelerations(t1 + h/2 * k2_dt1, t2 + h/2 * k2_dt2, w1 + h/2 * k2_dw1, w2 + h/2 * k2_dw2)
+
+        k4_dt1, k4_dt2 = w1 + h * k3_dw1, w2 + h * k3_dw2
+        k4_dw1, k4_dw2 = compute_accelerations(t1 + h * k3_dt1, t2 + h * k3_dt2, w1 + h * k3_dw1, w2 + h * k3_dw2)
+
+        t1 += (h/6) * (k1_dt1 + 2 * k2_dt1 + 2 * k3_dt1 + k4_dt1)
+        t2 += (h/6) * (k1_dt2 + 2 * k2_dt2 + 2 * k3_dt2 + k4_dt2)
+        w1 += (h/6) * (k1_dw1 + 2 * k2_dw1 + 2 * k3_dw1 + k4_dw1)
+        w2 += (h/6) * (k1_dw2 + 2 * k2_dw2 + 2 * k3_dw2 + k4_dw2)
+
+        w1 *= 1 - friction * h
+        w2 *= 1 - friction * h
+        
+points = deque(maxlen=200)
 running = True
 while running:
-    dt = clock.tick(FPS) / 1000.0
+    dt = clock.tick(FPS) / 1000.0 * 1
     
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -85,11 +105,19 @@ while running:
     x2 = x1 + (l2 * SCALE) * math.sin(t2)
     y2 = y1 + (l2 * SCALE) * math.cos(t2)
     
+    points.append((x2, y2))
+    
     screen.fill((30, 30, 30))
     
-    pygame.draw.circle(screen, (255, 255, 255), (x0, y0), 10, width=0)
-    pygame.draw.circle(screen, (86, 227, 5), (x1, y1), 10, width=0)
-    pygame.draw.circle(screen, (227, 5, 5), (x2, y2), 10, width=0)
+    circleSize = 20
+    lineWidth = 16
+    if len(points) > 1:
+        pygame.draw.lines(screen, (143, 31, 156), False, points, width=7)
+    pygame.draw.line(screen, (255,255,255), (x0, y0), (x1, y1), width=lineWidth)
+    pygame.draw.line(screen, (255,255,255), (x1, y1), (x2, y2), width=lineWidth)
+    pygame.draw.circle(screen, (74, 73, 73), (x0, y0), circleSize, width=0)
+    pygame.draw.circle(screen, (86, 227, 5), (x1, y1), circleSize, width=0)
+    pygame.draw.circle(screen, (227, 5, 5), (x2, y2), circleSize, width=0)
             
     pygame.display.flip()
 
