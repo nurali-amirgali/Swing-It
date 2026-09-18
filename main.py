@@ -13,6 +13,9 @@ pygame.display.set_caption("Double pendulum")
 
 clock = pygame.time.Clock()
 FPS = 60
+BG_COLOR = (30, 30, 30)
+DARK_OVERLAY = (0, 0, 0, 200)
+TRANSPARENT = (0, 0, 0, 0) 
 
 #the mass of the weight thingies at the bottom of each pendulum
 m1 = 1
@@ -36,7 +39,8 @@ g = 9.81
 x0 = WIDTH/2
 y0 = HEIGHT * 0.5
 
-friction = 0.01
+regularFriction = 0.05
+friction = regularFriction
 
 SCALE = 300
 
@@ -61,7 +65,6 @@ def compute_accelerations(t1, t2, w1, w2):
     alpha2 = numerator_2 / (l2 * den)
 
     return alpha1, alpha2
-
 
 def updateAngles(dt):
     global t1, t2, w1, w2
@@ -104,8 +107,7 @@ def updateBottomWhileDragging(dt, alpha1):
         w2 *= 1 - friction * h
         
 font = pygame.font.SysFont(None, 35)
-#text_surface = font.render("Hello, Pygame!", True, BLUE)
-#screen.blit(text_surface, (50, 50))        
+introFont = pygame.font.SysFont(None, 50)  
 
 draggingTop = False
 dragLastW1 = 0
@@ -131,47 +133,98 @@ ALPHA1_SMOOTHING = 0.25
 MAX_W1 = 25           
 MAX_ALPHA1 = 300
 
+INTOR_OFF = 0
+SHOW_CIRCLE = 1
+SHOW_CONTROLS = 2
+
+introTimes = [1, 5, 5, 2]
+introPhase = 0
+introTimer = 0
+controlTexts = [
+    "C/H = controls",
+    "P = pause",
+    "UP = increase sim speed",
+    "DOWN = decrease sim speed",
+    "R = reset simulation",
+    "L = apply random force",
+    "B = apply braking"
+]
+
+introHighlightOpacity = 0
+introHighlightFadeSpeed = 2
+introTextOpacity = 0
+introTextFadeSpeed = 3.4
+
+ControlsTextOpacity = 0
+ControlsTextFadeSpeed = 2
+showControls = False
+
 points = deque(maxlen=200)
 paused = False
 simSpeed = 1
 running = True
 while running:
-    dt = clock.tick(FPS) / 1000.0 * simSpeed
+    animationDt = clock.tick(FPS) / 1000.0
+    dt = animationDt * simSpeed
     
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_p:
-                paused = not paused
+                if introPhase != 1 and introPhase != 2 and introPhase != 0:
+                    paused = not paused
             elif event.key == pygame.K_r:
-                t1 = t2 = 0
-                w1 = w2 = 0
-                draggingTop = False
-                dragLastW1 = 0
-                lastTopDragAngle = t1
-                alpha1 = 0
-                points = deque(maxlen=200)
-                simSpeed = 1
-                paused = False
+                if introPhase != 1 and introPhase != 2 and introPhase != 0:
+                    t1 = t2 = 0
+                    w1 = w2 = 0
+                    draggingTop = False
+                    dragLastW1 = 0
+                    lastTopDragAngle = t1
+                    alpha1 = 0
+                    points = deque(maxlen=200)
+                    simSpeed = 1
+                    paused = False
                 
             elif event.key == pygame.K_UP:
-                simSpeed += 0.5
-                if opacityState == OFF or opacityState == FADE_OUT:
-                    opacityState = FADE_IN
-                    timeSinceFaded = 0
+                if introPhase != 1 and introPhase != 2 and introPhase != 0:
+                    if simSpeed < 20:
+                        simSpeed += 0.5
+                        if opacityState == OFF or opacityState == FADE_OUT:
+                            opacityState = FADE_IN
+                            timeSinceFaded = 0
+                    
             elif event.key == pygame.K_DOWN:
-                if simSpeed > 0.5:
-                    simSpeed -= 0.5
-                    if opacityState == OFF or opacityState == FADE_OUT:
-                        opacityState = FADE_IN
-                        timeSinceFaded = 0
+                if introPhase != 1 and introPhase != 2 and introPhase != 0:
+                    if simSpeed > 0.5:
+                        simSpeed -= 0.5
+                        if opacityState == OFF or opacityState == FADE_OUT:
+                            opacityState = FADE_IN
+                            timeSinceFaded = 0
+            
+            elif event.key == pygame.K_c or event.key == pygame.K_h:
+                if introPhase != 1 and introPhase != 2 and introPhase != 0:
+                    showControls = not showControls
+                    
+            elif event.key == pygame.K_l:
+                if w1 > 0:
+                    w1 += random.randint(0, 10)
+                else:
+                    w1 += random.randint(-10, 0)
+            
+        
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_b]:
+            friction = 0.99
+        else:
+            friction = regularFriction
                 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if not paused:
                 mouseX, mouseY = pygame.mouse.get_pos()
                 distanceCircleTop = math.dist((x1,y1), (mouseX, mouseY))
-                if distanceCircleTop <= (circleRadius + 50):
+                increaseRadius = min(20 * abs(w1), 200)
+                if distanceCircleTop <= (circleRadius + increaseRadius):
                     draggingTop = True
                     print("drag start")
     if not paused:
@@ -182,19 +235,21 @@ while running:
             dy = mouseY - y0
             
             radians = math.atan2(dx, dy)
-            angleChange = (lastTopDragAngle - radians) / dt if dt > 0 else 0
+            diff = radians - lastTopDragAngle
+            diff = (diff + math.pi) % (2 * math.pi) - math.pi
+            angleChange = -diff / dt if dt > 0 else 0
             lastTopDragAngle = radians
             t1 = radians
 
             rawW1 = -angleChange / 2
             w1 = w1 + W1_SMOOTHING * (rawW1 - w1)
+            w1 = max(-MAX_W1, min(MAX_W1, w1))
 
             rawAlpha1 = -(w1 - dragLastW1) / dt if dt > 0 else 0
             alpha1 = alpha1 + ALPHA1_SMOOTHING * (rawAlpha1 - alpha1)
             dragLastW1 = w1
-
-            w1 = max(-MAX_W1, min(MAX_W1, w1))
             alpha1 = max(-MAX_ALPHA1, min(MAX_ALPHA1, alpha1))
+            dragLastW1 = w1
 
             updateBottomWhileDragging(dt, alpha1)
 
@@ -210,8 +265,8 @@ while running:
         
         points.append((x2, y2))
 
-    screen.fill((30, 30, 30))
-    
+    screen.fill(BG_COLOR)
+
     if len(points) > 1:
         #pygame.draw.lines(screen, (143, 31, 156), False, points, width=7)
         line_surface = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
@@ -239,8 +294,9 @@ while running:
     gfxdraw.aacircle(screen, round(x0), round(y0), circleRadius, (74, 73, 73))
     
     #top pendulum circle
-    gfxdraw.filled_circle(screen, round(x1), round(y1), circleRadius, (86, 227, 5))
-    gfxdraw.aacircle(screen, round(x1), round(y1), circleRadius, (86, 227, 5))
+    topPendulumColor = (86, 227, 5) if not draggingTop else (68, 168, 10)
+    gfxdraw.filled_circle(screen, round(x1), round(y1), circleRadius, topPendulumColor)
+    gfxdraw.aacircle(screen, round(x1), round(y1), circleRadius, topPendulumColor)
     
     #bottom pendulum circle
     gfxdraw.filled_circle(screen, round(x2), round(y2), circleRadius, (227, 5, 5))
@@ -249,26 +305,92 @@ while running:
     if paused:
         pygame.draw.rect(screen, (255,255,255), (10,10,15,40), border_radius=0)
         pygame.draw.rect(screen, (255,255,255), (35,10,15,40), border_radius=0)
-            
+         
     if opacityState != OFF:
         if opacityState == FADE_IN:
-            textOpacity += fadeInSpeed * dt
+            textOpacity += fadeInSpeed * animationDt
             textOpacity = min(textOpacity, 1)
             if textOpacity >= 1:
                 opacityState = ON
         elif opacityState == FADE_OUT:
-            textOpacity -= fadeOutSpeed * dt
+            textOpacity -= fadeOutSpeed * animationDt
             textOpacity = max(textOpacity, 0)
             if textOpacity <= 0:
                 opacityState = OFF
         elif opacityState == ON:
-            timeSinceFaded += dt #convert to seconds
+            timeSinceFaded += animationDt #convert to seconds
             if timeSinceFaded >= showTime:
                 opacityState = FADE_OUT
         width, _ = font.size(f"Speed set to: {round(simSpeed, 2)}X")
         text = font.render(f"Speed set to: {round(simSpeed, 2)}X", True, (255,255,255))
         text.set_alpha(255 * textOpacity)
         screen.blit(text, ((WIDTH / 2) - (width/2), 10))
+    
+    if introPhase != len(introTimes) - 1:
+        introTimer += animationDt
+        introPhaseDuration = introTimes[introPhase]
+        if introTimer >= introPhaseDuration:
+            introTimer = 0
+            introPhase += 1
+
+    if introPhase == 1:
+        introPhaseDuration = introTimes[introPhase]
+        timeLeft = introPhaseDuration - introTimer 
+        if timeLeft <= (1/introHighlightFadeSpeed) + 0.5:
+            introHighlightOpacity -= introHighlightFadeSpeed * animationDt
+            introHighlightOpacity = max(introHighlightOpacity, 0)
+            
+            introTextOpacity -= introTextFadeSpeed * animationDt
+            introTextOpacity = max(introTextOpacity, 0)
+        else:
+            introHighlightOpacity += introHighlightFadeSpeed * animationDt
+            introHighlightOpacity = min(introHighlightOpacity, 0.7)
+            
+            introTextOpacity += introTextFadeSpeed * animationDt
+            introTextOpacity = min(introTextOpacity, 1)
+        circle_pos = (x1, y1)
+
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0,0,0,255 * introHighlightOpacity))
+
+        pygame.draw.circle(overlay, TRANSPARENT, circle_pos, circleRadius)
+        
+        screen.blit(overlay, (0, 0))
+        
+        text1 = introFont.render("drag the green handle around", True, (255, 255, 255))
+        text2 = introFont.render("to swing the pendulum", True, (255, 255, 255))
+
+        text1.set_alpha(255 * introTextOpacity)
+        text2.set_alpha(255 * introTextOpacity)
+
+        startY = 75
+        screen.blit(text1, ((WIDTH / 2) - (text1.get_width() / 2), startY))
+        screen.blit(text2, ((WIDTH / 2) - (text2.get_width() / 2), startY + 35))
+    
+    if introPhase == 2:
+        introPhaseDuration = introTimes[introPhase]
+        timeLeft = introPhaseDuration - introTimer 
+        if timeLeft <= (1/ControlsTextFadeSpeed) + 0.5:
+            showControls = False
+        else:
+            showControls = True
+    
+    if showControls:
+        ControlsTextOpacity += ControlsTextFadeSpeed * animationDt
+        ControlsTextOpacity = min(ControlsTextOpacity, 1)
+    else:
+        ControlsTextOpacity -= ControlsTextFadeSpeed * animationDt
+        ControlsTextOpacity = max(ControlsTextOpacity, 0)
+    
+    if ControlsTextOpacity:
+        startY = 200
+        changeY = 30
+        x = 5
+        for i, control in enumerate(controlTexts):
+            width, _ = font.size(control)
+            text = font.render(control, True, (255,255,255))
+            text.set_alpha(255 * ControlsTextOpacity)
+            screen.blit(text, (x, startY + (changeY * i)))
             
     pygame.display.flip()
 
