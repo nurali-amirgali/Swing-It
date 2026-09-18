@@ -107,6 +107,9 @@ def updateBottomWhileDragging(dt, alpha1):
         t2 += w2 * h
         w2 *= 1 - friction * h
 
+def sign(x):
+    return 1 if x >= 0 else -1
+
 font = pygame.font.SysFont(None, 35)
 introFont = pygame.font.SysFont(None, 50)
 
@@ -144,8 +147,8 @@ introTimer = 0
 controlTexts = [
     "C/H = controls",
     "P = pause",
-    "UP = increase sim speed",
-    "DOWN = decrease sim speed",
+    "W = increase sim speed",
+    "S = decrease sim speed",
     "R = reset simulation",
     "L = apply random force",
     "B = apply braking"
@@ -164,7 +167,6 @@ points = deque(maxlen=200)
 paused = False
 simSpeed = 1
 
-# these get set on the first frame before they're read
 x1 = y1 = x2 = y2 = 0
 
 async def main():
@@ -198,7 +200,7 @@ async def main():
                         simSpeed = 1
                         paused = False
 
-                elif event.key == pygame.K_UP:
+                elif event.key == pygame.K_w:
                     if introPhase != 1 and introPhase != 2 and introPhase != 0:
                         if simSpeed < 20:
                             simSpeed += 0.5
@@ -206,7 +208,7 @@ async def main():
                                 opacityState = FADE_IN
                                 timeSinceFaded = 0
 
-                elif event.key == pygame.K_DOWN:
+                elif event.key == pygame.K_s:
                     if introPhase != 1 and introPhase != 2 and introPhase != 0:
                         if simSpeed > 0.5:
                             simSpeed -= 0.5
@@ -236,7 +238,11 @@ async def main():
                     distanceCircleTop = math.dist((x1, y1), (mouseX, mouseY))
                     increaseRadius = min(20 * abs(w1), 200)
                     if distanceCircleTop <= (circleRadius + increaseRadius):
+                        w2 = abs(w1 + w2) * sign(w2) * 0.8
                         draggingTop = True
+                        alpha1 = 0
+                        lastTopDragAngle = t1
+                        dragLastW1 = w1
 
         if not paused:
             mouseButtons = pygame.mouse.get_pressed()
@@ -361,8 +367,8 @@ async def main():
 
             screen.blit(overlay, (0, 0))
 
-            text1 = introFont.render("drag the green handle around", True, (255, 255, 255))
-            text2 = introFont.render("to swing the pendulum", True, (255, 255, 255))
+            text1 = introFont.render("drag the green handle around and", True, (255, 255, 255))
+            text2 = introFont.render("release to swing the pendulum", True, (255, 255, 255))
 
             text1.set_alpha(255 * introTextOpacity)
             text2.set_alpha(255 * introTextOpacity)
